@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto-deployment
+  namespace: w2511
+spec:
+  selector:
+    matchLabels:
+      app: mosquitto
+  replicas: 1 # tells deployment to run 1 pods matching the template
+  template:
+    metadata:
+      labels:
+        app: mosquitto
+    spec:
+      containers:
+      - name: mosquitto
+        image: wolu0901/w251-project-mqtt
+        ports:
+        - containerPort: 1883

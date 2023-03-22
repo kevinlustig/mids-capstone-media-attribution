@@ -1,0 +1,17 @@
+name: cuda
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+
+dependencies:
+  - python=3.9
+  - opencv
+  - numpy
+  - pandas
+  - tensorflow
+  - pytorch::pytorch
+  - torchvision
+  - torchaudio
+  - cudatoolkit=11.7

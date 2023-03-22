@@ -1,0 +1,13 @@
+*.jpg
+*.jpeg
+*.png
+*.csv
+*.pth.tar
+*.pth
+*.zip
+*.tar
+*.pdf
+
+logs/*
+/logs/*
+*/logs/*
