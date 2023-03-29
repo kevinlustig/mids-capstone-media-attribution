@@ -47,10 +47,11 @@ opts = ModelOptions(**{
     'rgb_std':[0.2998, 0.2836, 0.2907],
     'checkpoint_path': "./checkpoint.pth.tar",
     #'arch': "efficientnet_v2_s"
-    'arch': "resnext101_64x4d"
+    #'arch': "resnext101_64x4d"
     #'arch': "densenet201"
     #'arch': 'efficientnet'
     #'arch':'inception_v3'
+    'arch':'vit_b_16'
 })
 
 def accuracy(output, target, topk=(1,)):
