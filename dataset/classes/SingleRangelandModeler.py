@@ -37,7 +37,7 @@ opts = ModelOptions(**{
     'momentum':0.5,
     'weight_decay':1e-4,
     'print_freq':50,
-    'batch_size':100,
+    'batch_size':120,
     'workers':0,
     'traindir':"train",
     'valdir':"val",
@@ -98,6 +98,9 @@ class SingleRangelandModeler():
     if hasattr(self.model,'fc'):
       num_ftrs = self.model.fc.in_features
       self.model.fc = nn.Linear(num_ftrs,opts.num_classes)
+    elif hasattr(self.model,'heads'):
+      num_ftrs = self.model.heads.head.in_features
+      self.model.heads.head = nn.Linear(num_ftrs,opts.num_classes)
     else:
       num_ftrs = self.model.classifier.in_features
       self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
