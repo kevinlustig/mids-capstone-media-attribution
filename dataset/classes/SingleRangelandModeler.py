@@ -37,7 +37,7 @@ opts = ModelOptions(**{
     'momentum':0.5,
     'weight_decay':1e-4,
     'print_freq':50,
-    'batch_size':132,
+    'batch_size':100,
     'workers':0,
     'traindir':"train",
     'valdir':"val",
@@ -47,9 +47,10 @@ opts = ModelOptions(**{
     'rgb_std':[0.2998, 0.2836, 0.2907],
     'checkpoint_path': "./checkpoint.pth.tar",
     #'arch': "efficientnet_v2_s"
-    #'arch': "resnext101_64x4d"
-    'arch': "densenet201"
+    'arch': "resnext101_64x4d"
+    #'arch': "densenet201"
     #'arch': 'efficientnet'
+    #'arch':'inception_v3'
 })
 
 def accuracy(output, target, topk=(1,)):
@@ -84,14 +85,21 @@ class SingleRangelandModeler():
     #self.model = CombinedModel(gpu,opts.arch,opts.num_classes)
 
     print("Initializing image model")
+
     if opts.arch == 'efficientnet':
       self.model = timm.create_model('tf_efficientnet_l2_ns', pretrained=False)
     else:
       self.model = getattr(models,opts.arch)(weights=None,progress=False)
 
-    #self.model.classifier.out_features = opts.num_classes
-    num_ftrs = self.model.classifier.in_features
-    self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
+    if opts.arch == 'inception_v3':
+      opts.image_size = 299
+
+    if hasattr(self.model,'fc'):
+      num_ftrs = self.model.fc.in_features
+      self.model.fc = nn.Linear(num_ftrs,opts.num_classes)
+    else:
+      num_ftrs = self.model.classifier.in_features
+      self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
 
     torch.cuda.set_device(gpu)
     self.model.cuda(gpu)
