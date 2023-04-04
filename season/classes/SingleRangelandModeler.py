@@ -31,7 +31,7 @@ cudnn.deterministic = True
 
 opts = ModelOptions(**{
     'start_epoch':0,
-    'num_classes':72,
+    'num_classes':4,
     'epochs':50,
     'lr':.01,
     'momentum':0.5,
@@ -48,11 +48,11 @@ opts = ModelOptions(**{
     'checkpoint_path': "./checkpoint.pth.tar",
     #'arch': "efficientnet_v2_s"
     #'arch': "resnext101_64x4d"
-    #'arch': "densenet201"
+    'arch': "densenet201"
     #'arch': 'efficientnet'
     #'arch':'inception_v3'
     #'arch':'vit_b_16'
-    'arch':'vit_b_32'
+    #'arch':'vit_b_32'
 })
 
 def accuracy(output, target, topk=(1,)):
