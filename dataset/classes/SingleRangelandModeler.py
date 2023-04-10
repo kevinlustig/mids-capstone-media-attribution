@@ -51,7 +51,8 @@ opts = ModelOptions(**{
     #'arch': "densenet201"
     #'arch': 'efficientnet'
     #'arch':'inception_v3'
-    'arch':'vit_b_16'
+    #'arch':'vit_b_16'
+    'arch':'vit_b_32'
 })
 
 def accuracy(output, target, topk=(1,)):
