@@ -243,20 +243,20 @@ class SingleRangelandModeler():
       'batch_time':AverageMeter('Time', ':6.3f'),
       'losses':AverageMeter('Loss', ':.4e'),
       'top1':AverageMeter('Acc@1', ':6.2f'),
-      'top5':AverageMeter('Acc@5', ':6.2f')
+      'top2':AverageMeter('Acc@2', ':6.2f')
     }
 
     self.meters['progress'] = ProgressMeter(
       len(loader),
-      [self.meters['batch_time'], self.meters['losses'], self.meters['top1'], self.meters['top5']],
+      [self.meters['batch_time'], self.meters['losses'], self.meters['top1'], self.meters['top2']],
       prefix=prefix
     )
 
   def update_meters(self, start, output, target, loss, batch):
-    acc1, acc5 = accuracy(output, target, topk=(1, 5))
+    acc1, acc2 = accuracy(output, target, topk=(1, 2))
     self.meters['losses'].update(loss.item(), batch.size(0))
     self.meters['top1'].update(acc1[0], batch.size(0))
-    self.meters['top5'].update(acc5[0], batch.size(0))
+    self.meters['top2'].update(acc2[0], batch.size(0))
     self.meters['batch_time'].update(time.time() - start)
 
   def display_progress(self,i,epoch):
@@ -273,8 +273,8 @@ class SingleRangelandModeler():
       self.meters['top1'].avg,
       step)
 
-    self.writer.add_scalar(prefix + 'Acc@5',
-      self.meters['top5'].avg,
+    self.writer.add_scalar(prefix + 'Acc@2',
+      self.meters['top2'].avg,
       step)
 
   def save_checkpoint(self,state, model, filename='checkpoint.pth.tar', gpu=0):
