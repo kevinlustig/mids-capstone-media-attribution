@@ -31,13 +31,13 @@ cudnn.deterministic = True
 
 opts = ModelOptions(**{
     'start_epoch':0,
-    'num_classes':3,
+    'num_classes':72,
     'epochs':50,
     'lr':.01,
     'momentum':0.5,
     'weight_decay':1e-4,
     'print_freq':50,
-    'batch_size':132,
+    'batch_size':120,
     'workers':0,
     'traindir':"train",
     'valdir':"val",
@@ -50,6 +50,9 @@ opts = ModelOptions(**{
     #'arch': "resnext101_64x4d"
     'arch': "densenet201"
     #'arch': 'efficientnet'
+    #'arch':'inception_v3'
+    #'arch':'vit_b_16'
+    #'arch':'vit_b_32'
 })
 
 def accuracy(output, target, topk=(1,)):
@@ -68,7 +71,7 @@ def accuracy(output, target, topk=(1,)):
       res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
-class SingleRangelandModeler():
+class SingleModeler():
   def __init__(self):
     self.writer = SummaryWriter('logs/' + opts.arch + '/' + datetime.now().strftime("%s"))
 
@@ -84,14 +87,24 @@ class SingleRangelandModeler():
     #self.model = CombinedModel(gpu,opts.arch,opts.num_classes)
 
     print("Initializing image model")
+
     if opts.arch == 'efficientnet':
       self.model = timm.create_model('tf_efficientnet_l2_ns', pretrained=False)
     else:
       self.model = getattr(models,opts.arch)(weights=None,progress=False)
 
-    #self.model.classifier.out_features = opts.num_classes
-    num_ftrs = self.model.classifier.in_features
-    self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
+    if opts.arch == 'inception_v3':
+      opts.image_size = 299
+
+    if hasattr(self.model,'fc'):
+      num_ftrs = self.model.fc.in_features
+      self.model.fc = nn.Linear(num_ftrs,opts.num_classes)
+    elif hasattr(self.model,'heads'):
+      num_ftrs = self.model.heads.head.in_features
+      self.model.heads.head = nn.Linear(num_ftrs,opts.num_classes)
+    else:
+      num_ftrs = self.model.classifier.in_features
+      self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
 
     torch.cuda.set_device(gpu)
     self.model.cuda(gpu)
@@ -230,20 +243,20 @@ class SingleRangelandModeler():
       'batch_time':AverageMeter('Time', ':6.3f'),
       'losses':AverageMeter('Loss', ':.4e'),
       'top1':AverageMeter('Acc@1', ':6.2f'),
-      'top2':AverageMeter('Acc@2', ':6.2f')
+      'top5':AverageMeter('Acc@5', ':6.2f')
     }
 
     self.meters['progress'] = ProgressMeter(
       len(loader),
-      [self.meters['batch_time'], self.meters['losses'], self.meters['top1'], self.meters['top2']],
+      [self.meters['batch_time'], self.meters['losses'], self.meters['top1'], self.meters['top5']],
       prefix=prefix
     )
 
   def update_meters(self, start, output, target, loss, batch):
-    acc1, acc2 = accuracy(output, target, topk=(1, 2))
+    acc1, acc5 = accuracy(output, target, topk=(1, 5))
     self.meters['losses'].update(loss.item(), batch.size(0))
     self.meters['top1'].update(acc1[0], batch.size(0))
-    self.meters['top2'].update(acc2[0], batch.size(0))
+    self.meters['top5'].update(acc5[0], batch.size(0))
     self.meters['batch_time'].update(time.time() - start)
 
   def display_progress(self,i,epoch):
@@ -260,8 +273,8 @@ class SingleRangelandModeler():
       self.meters['top1'].avg,
       step)
 
-    self.writer.add_scalar(prefix + 'Acc@2',
-      self.meters['top2'].avg,
+    self.writer.add_scalar(prefix + 'Acc@5',
+      self.meters['top5'].avg,
       step)
 
   def save_checkpoint(self,state, model, filename='checkpoint.pth.tar', gpu=0):

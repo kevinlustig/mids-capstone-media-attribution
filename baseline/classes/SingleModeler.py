@@ -17,11 +17,7 @@ import torchvision.models as models
 
 from torch.utils.tensorboard import SummaryWriter
 
-import timm
-
-from sklearn.metrics import classification_report
-
-#from classes.CombinedModel import CombinedModel
+from classes.CombinedModel import CombinedModel
 from classes.ImageFolderWithData import ImageFolderWithData
 from classes.utils import AverageMeter
 from classes.utils import ProgressMeter
@@ -31,28 +27,25 @@ cudnn.deterministic = True
 
 opts = ModelOptions(**{
     'start_epoch':0,
-    'num_classes':4,
-    'epochs':50,
-    'lr':.01,
-    'momentum':0.5,
-    'weight_decay':1e-4,
+    'num_classes':3592,
+    'epochs':8,
+    'lr':.05,
+    'momentum':0.9,
+    'weight_decay':5e-4,
     'print_freq':50,
-    'batch_size':120,
+    'batch_size':8,#10,
     'workers':0,
     'traindir':"train",
     'valdir':"val",
     'image_size':224,
     ##Derived from processing in dataset.ipynb
-    'rgb_mean':[0.3820, 0.4122, 0.4279],
-    'rgb_std':[0.2998, 0.2836, 0.2907],
+    'rgb_mean':[0.3869, 0.4162, 0.4315],
+    'rgb_std':[0.3015, 0.2849, 0.2924],
     'checkpoint_path': "./checkpoint.pth.tar",
     #'arch': "efficientnet_v2_s"
     #'arch': "resnext101_64x4d"
     'arch': "densenet201"
     #'arch': 'efficientnet'
-    #'arch':'inception_v3'
-    #'arch':'vit_b_16'
-    #'arch':'vit_b_32'
 })
 
 def accuracy(output, target, topk=(1,)):
@@ -71,7 +64,7 @@ def accuracy(output, target, topk=(1,)):
       res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
-class SingleRangelandModeler():
+class SingleModeler():
   def __init__(self):
     self.writer = SummaryWriter('logs/' + opts.arch + '/' + datetime.now().strftime("%s"))
 
@@ -84,37 +77,17 @@ class SingleRangelandModeler():
 
     #self.model = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes).models['image']
     #self.model = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes)
-    #self.model = CombinedModel(gpu,opts.arch,opts.num_classes)
-
-    print("Initializing image model")
-
-    if opts.arch == 'efficientnet':
-      self.model = timm.create_model('tf_efficientnet_l2_ns', pretrained=False)
-    else:
-      self.model = getattr(models,opts.arch)(weights=None,progress=False)
-
-    if opts.arch == 'inception_v3':
-      opts.image_size = 299
-
-    if hasattr(self.model,'fc'):
-      num_ftrs = self.model.fc.in_features
-      self.model.fc = nn.Linear(num_ftrs,opts.num_classes)
-    elif hasattr(self.model,'heads'):
-      num_ftrs = self.model.heads.head.in_features
-      self.model.heads.head = nn.Linear(num_ftrs,opts.num_classes)
-    else:
-      num_ftrs = self.model.classifier.in_features
-      self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
+    self.model = CombinedModel(gpu,opts.arch,opts.num_classes)
 
     torch.cuda.set_device(gpu)
     self.model.cuda(gpu)
 
     self.criterion = nn.CrossEntropyLoss().cuda(gpu)
     self.scaler = GradScaler()
-    self.optimizer = optim.Adam(
+    self.optimizer = optim.SGD(
         self.model.parameters(),
         lr=opts.lr,
-        #momentum=opts.momentum,
+        momentum=opts.momentum,
         weight_decay=opts.weight_decay
     )
     
@@ -125,8 +98,8 @@ class SingleRangelandModeler():
   def setup_dataset(self):
     #Training
     self.train_dataset = ImageFolderWithData(opts.traindir, data_file='./photo_metadata.csv', transform=transforms.Compose([
-      transforms.Resize(opts.image_size),
-      transforms.CenterCrop(opts.image_size),
+      transforms.RandomResizedCrop(opts.image_size),
+      transforms.RandomHorizontalFlip(),
       transforms.ToTensor(),
       transforms.Normalize(opts.rgb_mean, opts.rgb_std)
     ]))
@@ -233,10 +206,7 @@ class SingleRangelandModeler():
         if gpu == 0:
           self.log_progress('validation',epoch * len(self.val_loader) + i)
           if i % opts.print_freq == 0:
-            self.display_progress(i,epoch)
-            
-            _, predictions = torch.max(output, dim = 1)
-            print(classification_report(target.to('cpu'), predictions.to('cpu')))
+              self.display_progress(i,epoch)
 
   def create_meters(self,loader,prefix):
     self.meters = {
@@ -284,5 +254,4 @@ class SingleRangelandModeler():
         # random parameters and gradients are synchronized in backward passes.
         # Therefore, saving it in one process is sufficient.
         torch.save(state, filename)
-        torch.save(model, 'model.pth')
 
