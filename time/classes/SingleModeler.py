@@ -5,11 +5,7 @@ from datetime import datetime
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
-import torch.distributed as dist
 import torch.optim as optim
-import torch.multiprocessing as mp
-
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 from torch.cuda.amp import autocast, GradScaler
 
@@ -21,7 +17,11 @@ import torchvision.models as models
 
 from torch.utils.tensorboard import SummaryWriter
 
-from classes.CombinedModel import CombinedModel
+import timm
+
+from sklearn.metrics import classification_report
+
+#from classes.CombinedModel import CombinedModel
 from classes.ImageFolderWithData import ImageFolderWithData
 from classes.utils import AverageMeter
 from classes.utils import ProgressMeter
@@ -32,24 +32,27 @@ cudnn.deterministic = True
 opts = ModelOptions(**{
     'start_epoch':0,
     'num_classes':4,
-    'epochs':8,
+    'epochs':50,
     'lr':.001,
-    'momentum':0.9,
-    'weight_decay':5e-4,
+    'momentum':0.5,
+    'weight_decay':1e-4,
     'print_freq':50,
-    'batch_size':5,#10,
+    'batch_size':120,
     'workers':0,
-    'traindir':"data/train",
-    'valdir':"data/val",
+    'traindir':"train",
+    'valdir':"val",
     'image_size':224,
     ##Derived from processing in dataset.ipynb
     'rgb_mean':[0.3820, 0.4122, 0.4279],
     'rgb_std':[0.2998, 0.2836, 0.2907],
     'checkpoint_path': "./checkpoint.pth.tar",
     #'arch': "efficientnet_v2_s"
-    'arch': "resnext101_64x4d"
-    #'arch': "densenet201"
+    #'arch': "resnext101_64x4d"
+    'arch': "densenet201"
     #'arch': 'efficientnet'
+    #'arch':'inception_v3'
+    #'arch':'vit_b_16'
+    #'arch':'vit_b_32'
 })
 
 def accuracy(output, target, topk=(1,)):
@@ -68,68 +71,76 @@ def accuracy(output, target, topk=(1,)):
       res.append(correct_k.mul_(100.0 / batch_size))
     return res
 
-class RangelandModeler():
+class SingleModeler():
   def __init__(self):
     self.writer = SummaryWriter('logs/' + opts.arch + '/' + datetime.now().strftime("%s"))
 
-  def dist_init(self, gpu, args):
-    print("Initializing distributed training")
+  def init(self):
+    print("Initializing single-device training")
 
-    self.rank = args.nr * args.gpus + gpu
+    gpu = 0
 
-    self.setup_dataset(args)
+    self.setup_dataset()
 
-    #model_combo = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes).models['image']
-    model_combo = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes)
+    #self.model = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes).models['image']
+    #self.model = CombinedModel(gpu,opts.arch,self.train_dataset.geo_classes,self.train_dataset.date_classes,opts.num_classes)
+    #self.model = CombinedModel(gpu,opts.arch,opts.num_classes)
 
-    dist.init_process_group(                                   
-        backend='nccl',                                         
-        init_method='env://',                                   
-        world_size=args.world_size,                              
-        rank=self.rank                                               
-    )
+    print("Initializing image model")
+
+    if opts.arch == 'efficientnet':
+      self.model = timm.create_model('tf_efficientnet_l2_ns', pretrained=False)
+    else:
+      self.model = getattr(models,opts.arch)(weights=None,progress=False)
+
+    if opts.arch == 'inception_v3':
+      opts.image_size = 299
+
+    if hasattr(self.model,'fc'):
+      num_ftrs = self.model.fc.in_features
+      self.model.fc = nn.Linear(num_ftrs,opts.num_classes)
+    elif hasattr(self.model,'heads'):
+      num_ftrs = self.model.heads.head.in_features
+      self.model.heads.head = nn.Linear(num_ftrs,opts.num_classes)
+    else:
+      num_ftrs = self.model.classifier.in_features
+      self.model.classifier = nn.Linear(num_ftrs,opts.num_classes)
 
     torch.cuda.set_device(gpu)
-    model_combo.cuda(gpu)
+    self.model.cuda(gpu)
 
     self.criterion = nn.CrossEntropyLoss().cuda(gpu)
     self.scaler = GradScaler()
-    self.optimizer = optim.SGD(
-        model_combo.parameters(),
+    self.optimizer = optim.Adam(
+        self.model.parameters(),
         lr=opts.lr,
-        momentum=opts.momentum,
+        #momentum=opts.momentum,
         weight_decay=opts.weight_decay
     )
-    self.model = DDP(model_combo, device_ids=[gpu])
     
     self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer,T_0=len(self.train_loader),eta_min=.00001)
     
     self.run(gpu)
 
-  def setup_dataset(self, args):
+  def setup_dataset(self):
     #Training
-    self.train_dataset = ImageFolderWithData(opts.traindir, data_file='./data/download/Vegetation_Survey.csv', transform=transforms.Compose([
-      transforms.RandomResizedCrop(opts.image_size),
-      transforms.RandomHorizontalFlip(),
+    self.train_dataset = ImageFolderWithData(opts.traindir, data_file='./photo_metadata.csv', transform=transforms.Compose([
+      transforms.Resize(opts.image_size),
+      transforms.CenterCrop(opts.image_size),
       transforms.ToTensor(),
       transforms.Normalize(opts.rgb_mean, opts.rgb_std)
     ]))
-    self.train_sampler = torch.utils.data.distributed.DistributedSampler(
-      self.train_dataset, 
-      num_replicas=args.world_size, 
-      rank=self.rank
-    )
+
     self.train_loader = torch.utils.data.DataLoader(
       dataset=self.train_dataset,
       batch_size=opts.batch_size,
-      shuffle=False,            
+      shuffle=True,            
       num_workers=opts.workers,
-      pin_memory=True,
-      sampler=self.train_sampler
+      pin_memory=True
     )
 
     #Validation
-    self.val_dataset = ImageFolderWithData(opts.valdir, data_file='./data/download/Vegetation_Survey.csv', transform=transforms.Compose([
+    self.val_dataset = ImageFolderWithData(opts.valdir, data_file='./photo_metadata.csv', transform=transforms.Compose([
         transforms.Resize(opts.image_size),
         transforms.CenterCrop(opts.image_size),
         transforms.ToTensor(),
@@ -163,22 +174,23 @@ class RangelandModeler():
 
     self.model.train()
 
-    for i, (images, target, geo, date) in enumerate(self.train_loader):
+    # for i, (images, target, geo, date) in enumerate(self.train_loader):
+    for i, (images, target) in enumerate(self.train_loader):
       start = time.time() 
 
       #if i == 0:
       #  print(date)
 
       images = images.cuda(non_blocking=True)
-      geo = geo.cuda(non_blocking=True)
-      date = date.cuda(non_blocking=True)
+      # geo = geo.cuda(non_blocking=True)
+      # date = date.cuda(non_blocking=True)
       target = target.cuda(non_blocking=True)
 
       self.optimizer.zero_grad()
       with autocast():
         #output = self.model(images,geo,date)
-        output = self.model(images,date)
-        #output = self.model(images)
+        #output = self.model(images,date)
+        output = self.model(images)
         loss = self.criterion(output, target)
 
       self.scaler.scale(loss).backward()
@@ -203,16 +215,17 @@ class RangelandModeler():
 
     with torch.no_grad():
       start = time.time()
-      for i, (images, target, geo, date) in enumerate(self.val_loader):
+      #for i, (images, target, geo, date) in enumerate(self.val_loader):
+      for i, (images, target) in enumerate(self.val_loader):
           
         images = images.cuda(non_blocking=True)
-        geo = geo.cuda(non_blocking=True)
-        date = date.cuda(non_blocking=True)
+        # geo = geo.cuda(non_blocking=True)
+        # date = date.cuda(non_blocking=True)
         target = target.cuda(non_blocking=True)
         
         #output = self.model(images,geo,date)
-        output = self.model(images,date)
-        #output = self.model(images)
+        #output = self.model(images,date)
+        output = self.model(images)
         loss = self.criterion(output, target)
 
         self.update_meters(start, output, target, loss, images)
@@ -220,7 +233,10 @@ class RangelandModeler():
         if gpu == 0:
           self.log_progress('validation',epoch * len(self.val_loader) + i)
           if i % opts.print_freq == 0:
-              self.display_progress(i,epoch)
+            self.display_progress(i,epoch)
+            
+            _, predictions = torch.max(output, dim = 1)
+            print(classification_report(target.to('cpu'), predictions.to('cpu')))
 
   def create_meters(self,loader,prefix):
     self.meters = {
@@ -268,12 +284,5 @@ class RangelandModeler():
         # random parameters and gradients are synchronized in backward passes.
         # Therefore, saving it in one process is sufficient.
         torch.save(state, filename)
+        torch.save(model, 'model.pth')
 
-    # Use a barrier() to make sure that process 1 loads the model after process
-    # 0 saves it.
-    dist.barrier()
-    # configure map_location properly
-    map_location = {'cuda:%d' % 0: 'cuda:%d' % gpu}
-    checkpoint = torch.load(filename, map_location=map_location)
-    self.model.load_state_dict(checkpoint['state_dict'])
-    self.optimizer.load_state_dict(checkpoint['optimizer_dict'])

@@ -1,7 +1,7 @@
-from classes.SingleRangelandModeler import SingleRangelandModeler
+from classes.SingleModeler import SingleModeler
 
 def main():
-    modeler = SingleRangelandModeler()
+    modeler = SingleModeler()
     modeler.init()
 
 if __name__ == '__main__':
